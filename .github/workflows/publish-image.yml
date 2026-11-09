@@ -1,0 +1,38 @@
+# TEMPORARIO (Lab 4, Parte 2): publica a primeira imagem no GHCR sem token pessoal
+# e sem upload do seu computador (a imagem tem ~4 GB).
+# Uso unico: Actions > "Publicar imagem (temporario)" > Run workflow, com a tag v1.0.0.
+# Depois que a imagem existir no GHCR, este arquivo e removido: quem publica as
+# proximas versoes e o job "release" do cd.yml.
+name: Publicar imagem (temporario)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag JA existente no repositorio, a construir e publicar (ex.: v1.0.0)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      # constroi exatamente o commit da tag, nao o da main
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build e push com a versao
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          IMAGE=ghcr.io/joseantonioneto/mlops-2026-2   # em minusculas
+          docker build -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
