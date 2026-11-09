@@ -100,10 +100,14 @@ jobs:
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       WANDB_PROJECT: ${{ secrets.WANDB_PROJECT }}
       WANDB_MODELS: ${{ secrets.WANDB_MODELS }}
-      MONGO_URL: ${{ secrets.MONGO_URL }}
       # Valor literal (não é segredo): banco separado para o CI não
       # poluir os dados reais.
       MONGO_DB: ci_tests
+      # O MongoDB do CI é um container criado pelo docker-compose.ci.yml
+      # (sem Atlas e sem secret MONGO_URL). Com COMPOSE_FILE, todos os
+      # comandos "docker compose" abaixo usam os dois arquivos, sem precisar
+      # de -f em cada um. (Em Linux o separador é ":".)
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
@@ -113,7 +117,7 @@ jobs:
       - name: Conferir segredos
         run: |
           faltando=0
-          for nome in WANDB_API_KEY WANDB_PROJECT WANDB_MODELS MONGO_URL; do
+          for nome in WANDB_API_KEY WANDB_PROJECT WANDB_MODELS; do
             if [ -z "${!nome}" ]; then
               echo "::error::Segredo $nome vazio ou não cadastrado (Settings > Secrets and variables > Actions)"
               faltando=1

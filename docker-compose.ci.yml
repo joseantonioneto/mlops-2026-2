@@ -1,0 +1,19 @@
+# Usado SOMENTE pelo CI (veja COMPOSE_FILE no job "smoke" do .github/workflows/ci.yml).
+# Acrescenta um MongoDB em container ao lado da API, no lugar do Atlas:
+# assim o CI nao precisa de conta em nuvem nem do secret MONGO_URL.
+services:
+  mongo:
+    image: mongo:7
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  intent-clf:
+    environment:
+      # tem prioridade sobre o MONGO_URL=${MONGO_URL} do docker-compose.yml
+      - MONGO_URL=mongodb://mongo:27017/
+    depends_on:
+      mongo:
+        condition: service_healthy
