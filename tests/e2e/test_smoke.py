@@ -20,7 +20,9 @@ if not BASE_URL:
 def test_raiz_responde_ok():
     resposta = httpx.get(f"{BASE_URL}/", timeout=TIMEOUT)
     assert resposta.status_code == 200
-    assert resposta.json() == {"status": "ok"}
+    corpo = resposta.json()
+    assert corpo["status"] == "ok"
+    assert "version" in corpo  # APP_VERSION, ou "dev" quando a variavel nao existe
 
 
 def test_predicao_e_gravada_no_mongo_real():
