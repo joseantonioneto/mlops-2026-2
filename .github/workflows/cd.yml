@@ -1,0 +1,93 @@
+# .github/workflows/cd.yml
+# CD: responde "a versao chegou na URL publica e funciona?".
+name: CD
+
+on:
+  push:
+    tags: ['v*']          # versao nova: git push origin v1.0.1
+  workflow_dispatch:      # rollback: botao "Run workflow"
+    inputs:
+      tag:
+        description: 'Tag ja publicada no GHCR (ex.: v1.0.0)'
+        required: true
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}   # tag digitada ou tag enviada
+  APP_NAME: intent-clf2
+  RESOURCE_GROUP: mlops-2026-2-neto
+
+jobs:
+  # 1. Roda o ci.yml inteiro (test + smoke) no commit da tag.
+  # So segue se tudo passar. No rollback, e pulado.
+  ci:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit      # o smoke precisa do secret do W&B
+
+  # 2. Constroi a imagem e publica no GHCR com a tag da versao
+  release:
+    needs: ci
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build e push com a versao
+        run: |
+          IMAGE=ghcr.io/joseantonioneto/mlops-2026-2   # em minusculas
+          # o label vincula o pacote do GHCR a este repositorio (evita "denied" no push)
+          docker build -t "$IMAGE:$TAG" \
+            --label "org.opencontainers.image.source=https://github.com/joseantonioneto/mlops-2026-2" .
+          docker push "$IMAGE:$TAG"
+
+  # 3. Troca a imagem no Azure Container Apps (espera aprovacao)
+  deploy:
+    needs: release
+    if: ${{ !failure() && !cancelled() }}   # roda tambem no rollback (release pulado)
+    environment: production
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write     # pedir o "cracha" OIDC
+      contents: read
+    steps:
+      - name: Login no Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Atualizar imagem e versao no Container Apps
+        run: |
+          IMAGE=ghcr.io/joseantonioneto/mlops-2026-2   # em minusculas
+          # o app tem 2 containers (api + mongo): --container-name diz qual deles trocar
+          az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --container-name api \
+            --image "$IMAGE:$TAG" \
+            --set-env-vars APP_VERSION="$TAG"
+
+  # 4. Testa a URL publica e confere se a versao certa esta no ar
+  verify:
+    needs: deploy
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          URL=${{ vars.APP_URL }}
+          MSG='{"nome":"cd","text":"não entendi nada"}'
+          # ate 15 min (startup lento)
+          for _ in $(seq 90); do
+            if curl -fsS "$URL/" | grep -q "\"$TAG\"" &&
+               curl -fsS -X POST "$URL/predictions" \
+                 -H "Content-Type: application/json" -d "$MSG"; then
+              echo "OK: $TAG no ar"; exit 0
+            fi
+            sleep 10
+          done
+          echo "Falhou: $TAG nao respondeu. Faca o rollback."; exit 1
