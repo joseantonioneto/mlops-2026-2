@@ -45,6 +45,7 @@ escrever_template() {
       "location": "[parameters('location')]",
       "properties": {
         "managedEnvironmentId": "[parameters('environmentId')]",
+        "workloadProfileName": "Consumption",
         "configuration": {
           "activeRevisionsMode": "Single",
           "ingress": { "external": true, "targetPort": 8000, "transport": "auto" },
@@ -133,15 +134,23 @@ main() {
   if [ "$RESUME" = 1 ]; then
     LOC=$(az group show -n "$RG" --query location -o tsv)
     echo "Regiao do grupo: $LOC"
-    if ! az containerapp env show -n "$ENV_NAME" -g "$RG" >/dev/null 2>&1; then
+    # Se o app ainda nao existe, o environment de uma tentativa anterior pode ter ficado do tipo
+    # "express" (que NAO aceita 2 containers no mesmo app). Recria com o modo certo.
+    if ! az containerapp show -n "$APP" -g "$RG" >/dev/null 2>&1; then
+      if az containerapp env show -n "$ENV_NAME" -g "$RG" >/dev/null 2>&1; then
+        echo "Recriando o environment '$ENV_NAME' no modo WorkloadProfiles (aceita sidecar) ..."
+        az containerapp env delete -n "$ENV_NAME" -g "$RG" --yes --only-show-errors -o none
+      fi
       echo "Criando o environment '$ENV_NAME' ..."
-      az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" --only-show-errors -o none
+      az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" \
+        --environment-mode WorkloadProfiles --only-show-errors -o none
     fi
   else
     for reg in "${REGIOES[@]}"; do
       echo "Tentando a regiao $reg ..."
       if az group create -n "$RG" -l "$reg" --tags lab=mlops-2026-2 --only-show-errors >/dev/null 2>&1; then
-        if az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$reg" --only-show-errors >/dev/null 2>&1; then
+        if az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$reg" \
+             --environment-mode WorkloadProfiles --only-show-errors >/dev/null 2>&1; then
           LOC="$reg"; break
         fi
         echo "  (Container Apps indisponivel em $reg para esta assinatura)"
